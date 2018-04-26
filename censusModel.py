@@ -46,12 +46,11 @@ lr = pyspark.ml.classification.LogisticRegression(regParam=reg)
 model = lr.fit(train)
 
 def predict(spark, model, inputs):
-	from pandas import read_csv
 	cols = ['age','workclass','fnlwgt','education','education-num','marital-status', \
 		'occupation','relationship','race','sex','capital-gain', \
 		'capital-loss','hours-per-week','native-country','label']
-	TESTDATA = StringIO(inputs[0])
-	data = spark.createDataFrame(read_csv(TESTDATA, header=None, names=cols))
+	tup = tuple([float(i) for i in inputs[0].split(',')])
+	data = spark.createDataFrame([tup], schema=cols)
 	feature_cols = cols[:-1]
 	assembler = pyspark.ml.feature.VectorAssembler(inputCols=feature_cols, outputCol='features')
 	data = assembler.transform(data)
@@ -66,8 +65,7 @@ deploy_pyspark_model(
     input_type="string",
     func=predict,
     pyspark_model=model,
-    sc=sc,
-    pkgs_to_install=["pandas"])
+    sc=sc)
 
 clipper_conn.register_application(
 	name="pyspark-app",
