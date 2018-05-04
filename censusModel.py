@@ -24,7 +24,7 @@ spark = SparkSession                .builder                .appName("adult-data
 sc = spark.sparkContext
 
 clipper_conn = ClipperConnection(DockerContainerManager())
-clipper_conn.start_clipper()
+clipper_conn.start_clipper(query_frontend_image="clipper/query_test:develop")
 
 cols = ['age','workclass','fnlwgt','education','education-num','marital-status', \
 	'occupation','relationship','race','sex','capital-gain', \
@@ -46,34 +46,36 @@ lr = pyspark.ml.classification.LogisticRegression(regParam=reg)
 model = lr.fit(train)
 
 def predict(spark, model, inputs):
-	from pandas import read_csv
-	cols = ['age','workclass','fnlwgt','education','education-num','marital-status', \
-		'occupation','relationship','race','sex','capital-gain', \
-		'capital-loss','hours-per-week','native-country','label']
-	TESTDATA = StringIO(inputs[0])
-	data = spark.createDataFrame(read_csv(TESTDATA, header=None, names=cols))
-	feature_cols = cols[:-1]
-	assembler = pyspark.ml.feature.VectorAssembler(inputCols=feature_cols, outputCol='features')
-	data = assembler.transform(data)
-	data = data.select(['features', 'label'])
-	output = model.transform(data).select("prediction").rdd.flatMap(lambda x: x).collect()
-	return output
+    cols = ['age','workclass','fnlwgt','education','education-num','marital-status', \
+        'occupation','relationship','race','sex','capital-gain', \
+        'capital-loss','hours-per-week','native-country','label']
+    output = []
+    for x in inputs:
+        tup = tuple([float(i) for i in x])
+        data = spark.createDataFrame([tup], schema=cols)
+        feature_cols = cols[:-1]
+        assembler = pyspark.ml.feature.VectorAssembler(inputCols=feature_cols, outputCol='features')
+        data = assembler.transform(data)
+        data = data.select(['features', 'label'])
+        output.append(model.transform(data).select("prediction").rdd.flatMap(lambda x: x).collect())
+    return output
 
 deploy_pyspark_model(
     clipper_conn,
     name="pyspark-test",
     version=1,
-    input_type="string",
+    input_type="doubles",
     func=predict,
+    batch_size=10,
     pyspark_model=model,
-    sc=sc,
-    pkgs_to_install=["pandas"])
+    sc=sc)
 
 clipper_conn.register_application(
 	name="pyspark-app",
-	input_type="strings",
+	input_type="doubles",
 	default_output="-1",
     slo_micros=9000000) #will return default value in 9 seconds
 
 clipper_conn.link_model_to_app(app_name="pyspark-app", model_name="pyspark-test")
+clipper_conn.set_num_replicas(name="pyspark-test", num_replicas=2)
 
